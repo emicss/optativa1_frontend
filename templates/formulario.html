@@ -1,0 +1,50 @@
+{% extends 'layout.html' %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-8 col-lg-6">
+
+        <div class="card shadow border-0 mt-3">
+            <div class="card-header bg-white text-center py-3">
+                <h4 class="mb-0 text-secondary fw-bold">
+                    {{ '✏️ Modificar Registro' if item else '📄 Añadir Nuevo Registro' }}
+                </h4>
+            </div>
+
+            <div class="card-body p-4 p-md-5">
+                <form method="POST">
+
+                    <div class="mb-4">
+                        <label for="id" class="form-label fw-bold">ID del Registro:</label>
+                        <input type="text" class="form-control form-control-lg {{ 'bg-light' if item else '' }}" id="id"
+                            name="id" value="{{ item.id if item else '' }}" {{ 'readonly' if item else 'required' }}
+                            placeholder="Ej. 101">
+                        {% if item %}
+                        <div class="form-text text-muted">El identificador único no se puede modificar.</div>
+                        {% endif %}
+                    </div>
+
+                    <div class="mb-4">
+                        <label for="titulo" class="form-label fw-bold">Título (Field 2):</label>
+                        <input type="text" class="form-control form-control-lg" id="titulo" name="titulo"
+                            value="{{ item.titulo if item else '' }}" required placeholder="Ej. Proyecto de Redes">
+                    </div>
+
+                    <div class="mb-5">
+                        <label for="autor" class="form-label fw-bold">Autor (Field 3):</label>
+                        <input type="text" class="form-control form-control-lg" id="autor" name="autor"
+                            value="{{ item.autor if item else '' }}" required placeholder="Ej. Tu Nombre">
+                    </div>
+
+                    <div class="d-grid gap-3">
+                        <button type="submit" class="btn btn-success btn-lg fw-bold">Guardar Datos</button>
+                        <a href="{{ url_for('inicio') }}" class="btn btn-outline-secondary">Cancelar y Volver</a>
+                    </div>
+
+                </form>
+            </div>
+        </div>
+
+    </div>
+</div>
+{% endblock %}
