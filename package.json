@@ -1,0 +1,26 @@
+{
+  "name": "folio-facturacion",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "format": "prettier --write src vite.config.js index.html",
+    "format:check": "prettier --check src vite.config.js index.html",
+    "test": "node --test tests/*.test.js"
+  },
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
+  },
+  "dependencies": {
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^5.2.0",
+    "prettier": "^3.9.9",
+    "vite": "^7.3.6"
+  }
+}

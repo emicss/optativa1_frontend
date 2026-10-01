@@ -1,63 +1,54 @@
-from flask import Flask, render_template, request, redirect, url_for
+import os
+from pathlib import Path
+
 import requests
+from flask import Flask, jsonify, request, send_from_directory
 
-app = Flask(__name__)
+app = Flask(__name__, static_folder=None)
+DIST_DIR = Path(__file__).resolve().parent / "dist"
+AWS_API_URL = os.environ.get(
+    "AWS_API_URL", "https://zu3g6t4634.execute-api.us-east-1.amazonaws.com/v1/datos"
+)
 
-# URL construida con los datos de tu captura (Asegúrate de que 'v1' sea tu etapa)
-AWS_API_URL = "https://zu3g6t4634.execute-api.us-east-1.amazonaws.com/v1/datos" 
 
-@app.route('/')
-def inicio():
+@app.get("/")
+@app.get("/login")
+def frontend():
+    if not (DIST_DIR / "index.html").is_file():
+        return "Primero ejecuta npm install y npm run build, o usa npm run dev para desarrollar.", 503
+    return send_from_directory(DIST_DIR, "index.html")
+
+
+@app.get("/assets/<path:filename>")
+def frontend_assets(filename):
+    return send_from_directory(DIST_DIR / "assets", filename)
+
+
+@app.route("/api/registros", methods=["GET", "POST", "PUT", "DELETE"])
+def registros():
+    """Adaptador para AWS. El login visual no proporciona autenticación."""
+    payload = None
+    if request.method != "GET":
+        payload = request.get_json(silent=True) or {}
+        if not isinstance(payload, dict):
+            return jsonify(error="Los datos enviados no son válidos."), 400
+        fields = ("id",) if request.method == "DELETE" else ("id", "titulo", "autor")
+        if not all(isinstance(payload.get(key), str) and payload[key].strip() for key in fields):
+            return jsonify(error="Completa todos los campos requeridos."), 400
+        payload = {key: payload[key].strip() for key in fields}
     try:
-        # Hace un GET sin ID para traer toda la lista gracias al scan()
-        response = requests.get(AWS_API_URL)
-        datos = response.json()
-        
-        # Si por alguna razón no es una lista, mandamos un arreglo vacío para no romper la vista
-        if not isinstance(datos, list):
-            datos = []
-    except Exception as e:
-        print(f"Error conectando a AWS: {e}")
-        datos = []
-        
-    return render_template('lista.html', items=datos)
+        response = requests.request(request.method, AWS_API_URL, json=payload, timeout=15)
+        response.raise_for_status()
+        if request.method == "GET":
+            data = response.json()
+            if not isinstance(data, list):
+                return jsonify(error="El servicio devolvió una respuesta inesperada."), 502
+            return jsonify(data)
+        return jsonify(ok=True)
+    except (requests.RequestException, ValueError):
+        app.logger.exception("No se pudo completar la operación con AWS")
+        return jsonify(error="No pudimos conectar con el servicio. Intenta de nuevo."), 502
 
-@app.route('/agregar', methods=['GET', 'POST'])
-def agregar():
-    if request.method == 'POST':
-        nuevo_id = request.form.get('id')
-        titulo = request.form.get('titulo')
-        autor = request.form.get('autor')
-        
-        payload = {"id": nuevo_id, "titulo": titulo, "autor": autor}
-        requests.post(AWS_API_URL, json=payload)
-        
-        return redirect(url_for('inicio'))
-        
-    return render_template('formulario.html', item=None)
 
-@app.route('/modificar/<id>', methods=['GET', 'POST'])
-def modificar(id):
-    if request.method == 'POST':
-        titulo_modificado = request.form.get('titulo')
-        autor_modificado = request.form.get('autor')
-        
-        payload = {"id": id, "titulo": titulo_modificado, "autor": autor_modificado}
-        requests.put(AWS_API_URL, json=payload)
-        
-        return redirect(url_for('inicio'))
-        
-    # Hace un GET pasando el ID para pre-llenar los campos del formulario
-    response = requests.get(f"{AWS_API_URL}?id={id}")
-    item_actual = response.json() if response.status_code == 200 else None
-    
-    return render_template('formulario.html', item=item_actual)
-
-@app.route('/eliminar/<id>')
-def eliminar(id):
-    payload = {"id": id}
-    requests.delete(AWS_API_URL, json=payload)
-    return redirect(url_for('inicio'))
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     app.run(debug=True)
