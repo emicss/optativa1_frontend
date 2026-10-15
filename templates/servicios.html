@@ -1,0 +1,280 @@
+{% extends "base.html" %}
+
+{% block heading_action %}
+<button type="button" class="button primary" onclick="openServiceModal()">
+  {{ icon('plus', size=18) }}
+  Nuevo servicio
+</button>
+{% endblock %}
+
+{% block content %}
+<section>
+  <div class="section-toolbar">
+    <div>
+      <h2>Catálogo de Servicios (+100 Registros en RDS)</h2>
+      <p>{{ servicios|length }} conceptos registrados con clave SAT y características</p>
+    </div>
+    <div class="search-field">
+      {{ icon('search', size=16) }}
+      <input type="text" id="serviceSearch" placeholder="Buscar por SKU o descripción…" oninput="filtrarServicios()">
+    </div>
+  </div>
+
+  <div class="service-grid" id="serviceGrid">
+    {% for s in servicios %}
+    <article class="service-card" data-search="{{ (s.sku ~ ' ' ~ s.descripcion ~ ' ' ~ (s.clave_sat or ''))|lower }}">
+      <div class="service-card-top">
+        <span class="service-symbol sage">
+          {{ icon('book', size=22) }}
+        </span>
+        <span style="font-size: 11px; font-weight: 600; color: #586753;">SAT: {{ s.clave_sat|default('80101500') }}</span>
+      </div>
+      <h3>{{ s.descripcion }}</h3>
+      <p>Código SKU: <strong>{{ s.sku }}</strong></p>
+      <div class="service-card-bottom">
+        <div>
+          <strong>${{ "{:,.2f}".format(s.precio_base|float) }}</strong>
+          <span> / unidad</span>
+          <small>Precio antes de IVA</small>
+        </div>
+        <button type="button" class="icon-button" title="Ver características y detalle" onclick="verDetalleServicio({{ s.servicio_id }}, '{{ s.sku }}', '{{ s.descripcion }}', {{ s.precio_base|float }}, '{{ s.clave_sat|default('') }}')">
+          {{ icon('arrow') }}
+        </button>
+      </div>
+    </article>
+    {% else %}
+    <div class="empty-state" style="grid-column: 1 / -1;">
+      {{ icon('book', size=32) }}
+      <h3>Catálogo de servicios vacío</h3>
+      <p>Registra el primer servicio o conecta AWS RDS para visualizar los +100 conceptos.</p>
+    </div>
+    {% endfor %}
+  </div>
+</section>
+
+<!-- MODAL ALTA DE SERVICIO (sp_CrearServicioCatalogos) -->
+<dialog id="serviceModal" class="modal">
+  <div class="modal-heading">
+    <h2>Nuevo Servicio · sp_CrearServicioCatalogos</h2>
+    <button type="button" class="icon-button" onclick="document.getElementById('serviceModal').close()">{{ icon('close') }}</button>
+  </div>
+  <form id="serviceForm" class="invoice-form" onsubmit="guardarServicio(event)">
+    <p class="modal-description">
+      Inserta un nuevo concepto en el catálogo de Servicios en RDS mediante el procedimiento <code>sp_CrearServicioCatalogos</code>.
+    </p>
+
+    <div id="serviceFormError" style="display:none; padding:10px 14px; background:#fdf2f0; color:#b24531; border-radius:8px; font-size:13px; margin-bottom:12px;"></div>
+
+    <div class="form-columns">
+      <div>
+        <label for="form_sku">Código SKU Único</label>
+        <input type="text" id="form_sku" required placeholder="SRV-101" style="text-transform: uppercase;">
+      </div>
+      <div>
+        <label for="form_clave_sat">Clave SAT</label>
+        <input type="text" id="form_clave_sat" required placeholder="80101500" value="80101500">
+      </div>
+    </div>
+
+    <label for="form_descripcion">Descripción Detallada del Servicio</label>
+    <input type="text" id="form_descripcion" required placeholder="Ej. Asesoría y Planeación Estratégica Mensual">
+
+    <label for="form_precio_base">Precio Base Unitario (MXN)</label>
+    <input type="number" id="form_precio_base" step="0.01" min="0.01" required placeholder="1800.00">
+
+    <div class="modal-actions" style="margin-top: 24px;">
+      <button type="button" class="button secondary" onclick="document.getElementById('serviceModal').close()">Cancelar</button>
+      <button type="submit" class="button primary">
+        Guardar en RDS (sp_CrearServicioCatalogos) {{ icon('arrow', size=16) }}
+      </button>
+    </div>
+  </form>
+</dialog>
+
+<!-- MODAL DETALLE Y GESTIÓN DE CARACTERÍSTICAS N:M (sp_AsignarCaracteristica) -->
+<dialog id="serviceDetailModal" class="modal" style="max-width: 620px;">
+  <div class="modal-heading">
+    <h2 id="detailServiceTitle">Detalle del Servicio</h2>
+    <button type="button" class="icon-button" onclick="document.getElementById('serviceDetailModal').close()">{{ icon('close') }}</button>
+  </div>
+  <div class="entity-detail">
+    <dl style="margin-bottom: 20px;">
+      <dt>Código SKU</dt><dd><strong id="detailServiceSku"></strong></dd>
+      <dt>Clave SAT</dt><dd><code id="detailServiceSat"></code></dd>
+      <dt>Precio Base</dt><dd id="detailServicePrecio"></dd>
+    </dl>
+
+    <h4 style="margin: 0 0 10px; font-size: 14px; color: #2e3d2f;">Características Asignadas (Servicio_Caracteristicas)</h4>
+    <div id="serviceCharacteristicsList" style="margin-bottom: 20px; display: flex; flex-direction: column; gap: 8px;">
+      <p style="font-size: 13px; color: #7f8b79;">Cargando características...</p>
+    </div>
+
+    <!-- FORMULARIO PARA ASIGNAR CARACTERÍSTICA (+50 registros de catálogo) -->
+    <div style="background: #f7f9f3; border: 1px solid var(--border); border-radius: 9px; padding: 16px;">
+      <h5 style="margin: 0 0 12px; font-size: 13px; color: #35583e;">Asignar Característica (sp_AsignarCaracteristica)</h5>
+      <form id="assignCharForm" onsubmit="asignarCaracteristica(event)">
+        <input type="hidden" id="assignServiceId" value="">
+        <div class="form-columns">
+          <div>
+            <label for="charSelect" style="font-size: 11px;">Característica (Catálogo RDS)</label>
+            <select id="charSelect" required style="font-size: 12px;">
+              <option value="" disabled selected>Selecciona una característica</option>
+              {% for c in caracteristicas %}
+              <option value="{{ c.caracteristica_id }}">{{ c.nombre_caracteristica }} ({{ c.tipo_dato }})</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div>
+            <label for="charValue" style="font-size: 11px;">Valor Asignado</label>
+            <input type="text" id="charValue" required placeholder="Ej. Sí / 12 meses / Alta" style="font-size: 12px;">
+          </div>
+        </div>
+        <div style="text-align: right; margin-top: 10px;">
+          <button type="submit" class="button secondary" style="font-size: 12px; padding: 7px 14px;">
+            Vincular (sp_AsignarCaracteristica)
+          </button>
+        </div>
+      </form>
+    </div>
+
+    <div class="modal-actions" style="margin-top: 24px;">
+      <a id="btnNewInvoiceWithService" href="/facturas/nueva" class="button primary full-width" style="text-decoration:none; text-align:center;">
+        Crear Factura con este Servicio {{ icon('plus', size=16) }}
+      </a>
+    </div>
+  </div>
+</dialog>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let currentServiceId = null;
+
+function filtrarServicios() {
+  const query = (document.getElementById('serviceSearch')?.value || '').toLowerCase();
+  const cards = document.querySelectorAll('.service-card');
+  cards.forEach(card => {
+    const cardSearch = card.getAttribute('data-search');
+    card.style.display = cardSearch.includes(query) ? 'flex' : 'none';
+  });
+}
+
+function openServiceModal() {
+  document.getElementById('serviceForm').reset();
+  document.getElementById('serviceFormError').style.display = 'none';
+  document.getElementById('serviceModal').showModal();
+}
+
+async function guardarServicio(e) {
+  e.preventDefault();
+  const errDiv = document.getElementById('serviceFormError');
+  errDiv.style.display = 'none';
+
+  const payload = {
+    sku: document.getElementById('form_sku').value.trim().toUpperCase(),
+    clave_sat: document.getElementById('form_clave_sat').value.trim(),
+    descripcion: document.getElementById('form_descripcion').value.trim(),
+    precio_base: parseFloat(document.getElementById('form_precio_base').value)
+  };
+
+  try {
+    const res = await fetch('/api/servicios', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Error al guardar servicio');
+
+    showToast(data.mensaje || 'Servicio registrado exitosamente');
+    document.getElementById('serviceModal').close();
+    setTimeout(() => window.location.reload(), 700);
+  } catch (err) {
+    errDiv.textContent = err.message;
+    errDiv.style.display = 'block';
+  }
+}
+
+async function verDetalleServicio(id, sku, desc, precio, claveSat) {
+  currentServiceId = id;
+  document.getElementById('assignServiceId').value = id;
+  document.getElementById('detailServiceTitle').textContent = desc;
+  document.getElementById('detailServiceSku').textContent = sku;
+  document.getElementById('detailServiceSat').textContent = claveSat || '80101500';
+  document.getElementById('detailServicePrecio').textContent = `$${precio.toFixed(2)} MXN + IVA`;
+  document.getElementById('btnNewInvoiceWithService').href = `/facturas/nueva?servicio_id=${id}`;
+
+  await cargarCaracteristicasServicio(id);
+  document.getElementById('serviceDetailModal').showModal();
+}
+
+async function cargarCaracteristicasServicio(servicioId) {
+  const list = document.getElementById('serviceCharacteristicsList');
+  list.innerHTML = '<p style="font-size: 13px; color: #7f8b79;">Cargando características vinculadas...</p>';
+
+  try {
+    const res = await fetch(`/api/servicios/${servicioId}/caracteristicas`);
+    const items = await res.json();
+
+    if (!Array.isArray(items) || !items.length) {
+      list.innerHTML = '<p style="font-size: 12px; color: #84917d; margin:0;">Este servicio aún no tiene características asignadas en Servicio_Caracteristicas.</p>';
+      return;
+    }
+
+    list.innerHTML = items.map(c => `
+      <div style="display:flex; justify-content:space-between; align-items:center; background:#fff; border:1px solid #e1e7db; border-radius:7px; padding:8px 12px;">
+        <div>
+          <strong style="font-size:12px; color:#2d3a2e;">${escapeHtml(c.nombre_caracteristica)}</strong>
+          <small style="color:#778572; display:block; font-size:11px;">Tipo: ${escapeHtml(c.tipo_dato)} · Valor: <span style="color:#35583e; font-weight:600;">${escapeHtml(c.valor_caracteristica)}</span></small>
+        </div>
+        <button type="button" class="icon-button danger" title="Desvincular" onclick="desasignarCaracteristica('${escapeHtml(servicioId)}', '${escapeHtml(c.caracteristica_id)}')">
+          <span style="font-size:16px; color:#b24531;">×</span>
+        </button>
+      </div>
+    `).join('');
+
+  } catch (err) {
+    list.innerHTML = '<p style="font-size: 12px; color: #b24531;">Error al consultar características.</p>';
+  }
+}
+
+async function asignarCaracteristica(e) {
+  e.preventDefault();
+  const cid = document.getElementById('charSelect').value;
+  const val = document.getElementById('charValue').value.trim();
+  if (!currentServiceId || !cid) return;
+
+  try {
+    const res = await fetch(`/api/servicios/${currentServiceId}/caracteristicas`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ caracteristica_id: cid, valor_caracteristica: val })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Error al asignar');
+
+    showToast(data.mensaje || 'Característica vinculada');
+    document.getElementById('charValue').value = '';
+    await cargarCaracteristicasServicio(currentServiceId);
+  } catch (err) {
+    alert(err.message);
+  }
+}
+
+async function desasignarCaracteristica(servicioId, caracteristicaId) {
+  if (!confirm('¿Deseas desvincular esta característica del servicio?')) return;
+  try {
+    const res = await fetch(`/api/servicios/${servicioId}/caracteristicas/${caracteristicaId}`, {
+      method: 'DELETE'
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Error al desvincular');
+
+    showToast('Característica desvinculada');
+    await cargarCaracteristicasServicio(servicioId);
+  } catch (err) {
+    alert(err.message);
+  }
+}
+</script>
+{% endblock %}

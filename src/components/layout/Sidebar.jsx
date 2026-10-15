@@ -31,7 +31,9 @@ export default function Sidebar({
             aria-current={section === tab ? "page" : undefined}
             onClick={() => onNavigate(tab)}
           >
-            <Icon name={["grid", "file", "users", "book"][index]} />
+            <Icon
+              name={["grid", "file", "users", "book", "database"][index] || "file"}
+            />
             <span className="nav-label">
               {tab === "inicio" ? "Inicio" : titles[tab]}
             </span>

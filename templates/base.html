@@ -1,0 +1,142 @@
+{% from "macros/icons.html" import icon %}
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ page_title|default('Folio') }} · Sistema de Facturación AWS</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/base.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/layout.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/billing.css') }}">
+  <style>
+    /* Ajustes específicos para navegación monolítica HTML */
+    .nav-item { text-decoration: none; display: flex; align-items: center; width: 100%; border: 0; cursor: pointer; }
+    .brand { display: flex; align-items: center; gap: 10px; padding: 0 4px 12px; }
+    .brand-logo { width: 34px; height: 34px; background: #35583e; color: #fff; border-radius: 8px; display: grid; place-items: center; font-weight: 700; font-size: 16px; }
+    .brand-text strong { display: block; font-size: 15px; color: #223023; line-height: 1.1; }
+    .brand-text span { font-size: 11px; color: #7f8d79; }
+    dialog::backdrop { background: rgba(23, 31, 22, 0.45); backdrop-filter: blur(2px); }
+    .toast-container { position: fixed; bottom: 24px; right: 24px; z-index: 9999; }
+    .toast { display: flex; align-items: center; gap: 12px; padding: 14px 20px; background: #233527; color: #f2f6ee; border-radius: 10px; box-shadow: 0 10px 25px rgba(0,0,0,0.18); font-size: 13px; font-weight: 500; animation: slideUp 0.25s ease-out; }
+    @keyframes slideUp { from { transform: translateY(16px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+  </style>
+</head>
+<body>
+  <div class="app-shell billing-shell">
+    <!-- BARRA LATERAL MONOLÍTICA -->
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-logo">F</div>
+        <div class="brand-text">
+          <strong>Folio</strong>
+          <span>Facturación</span>
+        </div>
+      </div>
+
+      <div class="company-switch">
+        <span class="company-symbol">N</span>
+        <div>
+          <strong>Mi negocio</strong>
+          <small>Espacio de facturación</small>
+        </div>
+        <span class="company-chevron">⌄</span>
+      </div>
+
+      <div class="workspace-label">PRINCIPAL</div>
+
+      <nav aria-label="Navegación principal">
+        <a href="/" class="nav-item {% if active_page == 'inicio' %}active{% endif %}" title="Inicio">
+          {{ icon('grid') }}
+          <span class="nav-label">Inicio</span>
+        </a>
+        <a href="/facturas" class="nav-item {% if active_page == 'facturas' %}active{% endif %}" title="Facturas">
+          {{ icon('file') }}
+          <span class="nav-label">Facturas</span>
+          {% if facturas_count is defined and facturas_count > 0 %}
+          <span class="nav-count">{{ facturas_count }}</span>
+          {% endif %}
+        </a>
+        <a href="/clientes" class="nav-item {% if active_page == 'clientes' %}active{% endif %}" title="Clientes">
+          {{ icon('users') }}
+          <span class="nav-label">Clientes</span>
+        </a>
+        <a href="/servicios" class="nav-item {% if active_page == 'servicios' %}active{% endif %}" title="Servicios">
+          {{ icon('book') }}
+          <span class="nav-label">Servicios</span>
+        </a>
+        <a href="/diagnostico" class="nav-item {% if active_page == 'diagnostico' %}active{% endif %}" title="Diagnóstico RDS">
+          {{ icon('database') }}
+          <span class="nav-label">Diagnóstico RDS</span>
+        </a>
+      </nav>
+
+      <div class="sidebar-tip">
+        <span class="tip-icon">✦</span>
+        <h3>Tu negocio, en orden.</h3>
+        <p>Clientes, servicios y facturas en AWS RDS y DynamoDB.</p>
+        <a href="/facturas/nueva" style="display:inline-flex; gap:6px; align-items:center; text-decoration:none; color:inherit; font-weight:600; font-size:11px; margin-top:8px;">
+          Crea una factura {{ icon('arrow', size=13) }}
+        </a>
+      </div>
+
+      <div class="profile">
+        <div class="avatar">A</div>
+        <div>
+          <strong>Mi cuenta</strong>
+          <span title="admin@minegocio.com">admin@minegocio.com</span>
+        </div>
+        <a href="/" class="icon-button" style="text-decoration:none; display:grid; place-items:center;" aria-label="Cerrar sesión">
+          {{ icon('logout') }}
+        </a>
+      </div>
+    </aside>
+
+    <!-- ÁREA DE CONTENIDO PRINCIPAL -->
+    <main class="dashboard">
+      <header class="topbar">
+        <span>
+          Mi negocio <span class="breadcrumb">/</span>
+          <strong>{{ page_title|default('Inicio') }}</strong>
+        </span>
+        <div class="topbar-right">
+          <span class="demo-pill">
+            <span class="status-dot"></span> Monolito Flask · AWS RDS
+          </span>
+          <span class="currency-label">MXN</span>
+          <div class="avatar">A</div>
+        </div>
+      </header>
+
+      <div class="dashboard-content">
+        <div class="page-heading">
+          <div>
+            <span class="eyebrow">{{ page_eyebrow|default('TU NEGOCIO, BIEN ORGANIZADO') }}</span>
+            <h1>{{ page_title|default('Facturación') }}<span>.</span></h1>
+            <p class="muted">{{ page_caption|default('') }}</p>
+          </div>
+          {% block heading_action %}
+          <a href="/facturas/nueva" class="button primary" style="text-decoration:none;">
+            {{ icon('plus', size=18) }}
+            Nueva factura
+          </a>
+          {% endblock %}
+        </div>
+
+        {% block content %}{% endblock %}
+
+        <footer class="dashboard-footer">
+          <span>
+            <span class="status-dot"></span> Conexión activa a AWS RDS (8 Tablas · 10 Stored Procedures) & DynamoDB
+          </span>
+          <span>Folio · Sistema de Facturación Monolítico</span>
+        </footer>
+      </div>
+    </main>
+  </div>
+
+  <div id="toastContainer" class="toast-container"></div>
+
+  <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

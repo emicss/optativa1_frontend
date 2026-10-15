@@ -1,0 +1,232 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="diagnostic-view">
+  <div class="section-toolbar" style="margin-bottom: 24px;">
+    <div>
+      <h2>Panel de Supervisión · AWS RDS & DynamoDB</h2>
+      <p>Verificación del modelo de 8 tablas SQL, 10 Stored Procedures transaccionales y NoSQL.</p>
+    </div>
+    <a href="/diagnostico" class="button secondary" style="text-decoration:none; display:inline-flex; align-items:center; gap:8px;">
+      {{ icon('refresh', size=16) }}
+      Actualizar diagnóstico
+    </a>
+  </div>
+
+  {% if not rds.connected %}
+  <div class="attention-card" style="margin-bottom: 24px; border-left-color: #b24531;">
+    <span class="attention-mark" style="background: #f9e5e3; color: #b24531;">!</span>
+    <div>
+      <h3>Atención: Base de datos RDS no accesible</h3>
+      <p>Error: {{ rds.error|default('Verifica las variables DB_HOST, DB_USER, DB_PASSWORD, DB_NAME en .env') }}</p>
+      <small style="color: #889382;">El backend está operando con fallback seguro de demostración para evitar caídas de la interfaz.</small>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- TARJETAS MÉTRICAS DE CONEXIÓN -->
+  <div class="overview-stats" style="grid-template-columns: repeat(3, minmax(0, 1fr)); margin-bottom: 24px;">
+    <article class="metric">
+      <div class="metric-top">
+        <span class="metric-label">Conexión AWS RDS</span>
+        <span class="metric-icon {% if rds.connected %}sage{% else %}sand{% endif %}">
+          {{ icon('database') }}
+        </span>
+      </div>
+      <div class="metric-value">
+        {% if rds.connected %}Conectado{% else %}Desconectado{% endif %}
+      </div>
+      <small class="metric-note">
+        {{ rds.host }}:{{ rds.port }} ({{ rds.database }})
+      </small>
+    </article>
+
+    <article class="metric">
+      <div class="metric-top">
+        <span class="metric-label">Motor de Base de Datos</span>
+        <span class="metric-icon sky">
+          {{ icon('grid') }}
+        </span>
+      </div>
+      <div class="metric-value" style="font-size: 20px;">
+        {{ rds.engine_version|default('MySQL/MariaDB') }}
+      </div>
+      <small class="metric-note">
+        {% if rds.connected %}Instancia activa en AWS RDS{% else %}Verificar archivo .env{% endif %}
+      </small>
+    </article>
+
+    <article class="metric">
+      <div class="metric-top">
+        <span class="metric-label">AWS DynamoDB (NoSQL)</span>
+        <span class="metric-icon {% if dynamo.connected %}sage{% else %}lilac{% endif %}">
+          {{ icon('check') }}
+        </span>
+      </div>
+      <div class="metric-value">
+        {% if dynamo.connected %}Activo{% else %}Standby / Local{% endif %}
+      </div>
+      <small class="metric-note">
+        Región: {{ dynamo.region|default('us-east-1') }} (Idempotencia y Logs)
+      </small>
+    </article>
+  </div>
+
+  <!-- 8 TABLAS SQL EN RDS -->
+  <div class="documents-panel" style="margin-bottom: 28px;">
+    <div class="panel-toolbar">
+      <div>
+        <h2>8 Tablas SQL Requeridas en RDS</h2>
+        <span>Verificación de existencia y conteo de filas en el esquema relacional</span>
+      </div>
+    </div>
+
+    <div class="table-scroll">
+      <table class="invoice-table">
+        <thead>
+          <tr>
+            <th>TABLA</th>
+            <th>TIPO DE ENTIDAD</th>
+            <th>REGISTROS</th>
+            <th>ESTADO EN RDS</th>
+            <th>REQUISITO DEL SISTEMA</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for table_name, info in rds.tablas.items() %}
+          <tr>
+            <td>
+              <strong>{{ table_name }}</strong>
+            </td>
+            <td>
+              <span style="font-size: 12px; color: #6e7766;">
+                {% if '_' in table_name %}Relación Intermedia N:M{% else %}Tabla Principal{% endif %}
+              </span>
+            </td>
+            <td class="amount-cell">
+              <strong>{{ info.count }}</strong>
+              <small>filas</small>
+            </td>
+            <td>
+              <span class="status-badge {% if info.exists %}paid{% else %}overdue{% endif %}">
+                <span></span>
+                {% if info.exists %}Tabla Creada{% else %}Pendiente{% endif %}
+              </span>
+            </td>
+            <td>
+              <span style="font-size: 12px; color: #4f654b;">
+                {% if table_name == 'Servicios' %}Catálogo de +100 registros
+                {% elif table_name == 'Caracteristicas' %}Catálogo de +50 registros
+                {% elif table_name == 'Clientes' %}Emisores y Receptores
+                {% elif table_name == 'Servicio_Caracteristicas' %}Relación N:M Servicios/Características
+                {% elif table_name == 'Facturas' %}Encabezado de facturación
+                {% elif table_name == 'Factura_Detalles' %}Partidas de servicios
+                {% elif table_name == 'Impuestos' %}Catálogo IVA, ISR, IEPS
+                {% elif table_name == 'Factura_Impuestos' %}Impuestos retenidos/trasladados
+                {% else %}Modelo SQL
+                {% endif %}
+              </span>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- 10 STORED PROCEDURES EN RDS -->
+  <div class="documents-panel" style="margin-bottom: 28px;">
+    <div class="panel-toolbar">
+      <div>
+        <h2>10 Procedimientos Almacenados (Stored Procedures)</h2>
+        <span>Prioridad transaccional directa mediante `CALL` con fallback SQL transparente</span>
+      </div>
+    </div>
+
+    <div class="table-scroll">
+      <table class="invoice-table">
+        <thead>
+          <tr>
+            <th>STORED PROCEDURE</th>
+            <th>PROPÓSITO TRANSACCIONAL</th>
+            <th>DISPONIBILIDAD</th>
+            <th>ESTRATEGIA DEL BACKEND</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% set sp_notes = {
+            'sp_AltaCliente': 'Valida RFC de 12 o 13 chars e inserta en Clientes',
+            'sp_CrearServicioCatalogos': 'Inserta en catálogo Servicios',
+            'sp_AsignarCaracteristica': 'Vincula servicio y característica en Servicio_Caracteristicas',
+            'sp_ValidarDatosFiscales': 'Verifica que emisor y receptor existan y estén activos',
+            'sp_GenerarFolioFactura': 'Crea encabezado en Facturas y devuelve factura_id',
+            'sp_InsertarPartida': 'Agrega conceptos en Factura_Detalles',
+            'sp_CalcularTotales': 'Suma importes, calcula Factura_Impuestos y actualiza totales',
+            'sp_ActualizarUUID': 'Guarda el uuid_sat al timbrar la factura',
+            'sp_ConsultarFacturaCompleta': 'SELECT con JOINs de la factura completa con partidas',
+            'sp_CancelarFactura': 'Cambia el estado de la factura a CANCELADA'
+          } %}
+          {% for sp_name, sp_info in rds.stored_procedures.items() %}
+          <tr>
+            <td>
+              <code style="font-size: 13px; font-weight: 600; color: #2d4734;">{{ sp_name }}</code>
+            </td>
+            <td>
+              <span style="font-size: 13px; color: #546050;">{{ sp_notes.get(sp_name, 'Operación transaccional') }}</span>
+            </td>
+            <td>
+              <span class="status-badge {% if sp_info.exists %}paid{% else %}pending{% endif %}">
+                <span></span>
+                {% if sp_info.exists %}En RDS (CALL){% else %}Fallback SQL{% endif %}
+              </span>
+            </td>
+            <td>
+              <span style="font-size: 12px; color: #455941;">
+                {% if sp_info.exists %}CALL {{ sp_name }}(...){% else %}Transacción SQL Directa en Python{% endif %}
+              </span>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- TABLAS DYNAMODB NOSQL -->
+  <div class="documents-panel">
+    <div class="panel-toolbar">
+      <div>
+        <h2>Tablas NoSQL en AWS DynamoDB</h2>
+        <span>Idempotencia en emisión y registro de auditoría de eventos</span>
+      </div>
+    </div>
+    <div style="padding: 16px 20px; display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+      <div style="border: 1px solid var(--border); border-radius: 9px; padding: 16px; background: #fff;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+          <strong>facturacion_idempotencia</strong>
+          <span class="status-badge {% if dynamo.idempotencia_table.activa %}paid{% else %}draft{% endif %}">
+            <span></span>{% if dynamo.idempotencia_table.activa %}Activa{% else %}Standby{% endif %}
+          </span>
+        </div>
+        <p style="font-size: 12px; color: #6e7766; margin: 0 0 8px;">
+          Clave primaria: <code>idempotency_key</code> (String). Almacena estado, factura_id, respuesta JSON y TTL.
+        </p>
+        <small style="color: #8c9783;">Garantiza que peticiones duplicadas de facturación devuelvan el mismo resultado.</small>
+      </div>
+
+      <div style="border: 1px solid var(--border); border-radius: 9px; padding: 16px; background: #fff;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+          <strong>log_eventos_facturacion</strong>
+          <span class="status-badge {% if dynamo.logs_table.activa %}paid{% else %}draft{% endif %}">
+            <span></span>{% if dynamo.logs_table.activa %}Activa{% else %}Standby{% endif %}
+          </span>
+        </div>
+        <p style="font-size: 12px; color: #6e7766; margin: 0 0 8px;">
+          PK: <code>factura_id</code>, SK: <code>timestamp</code>. Registro histórico de emisión, timbrado y cancelaciones.
+        </p>
+        <small style="color: #8c9783;">Auditoría distribuida complementaria al motor transaccional de RDS.</small>
+      </div>
+    </div>
+  </div>
+</section>
+{% endblock %}

@@ -1,0 +1,163 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="overview-stats">
+  <article class="metric">
+    <div class="metric-top">
+      <span class="metric-label">Total facturado</span>
+      <span class="metric-icon sage">{{ icon('file') }}</span>
+    </div>
+    <div class="metric-value">{{ total_facturado }}</div>
+    <small class="metric-note">{{ facturas|length }} facturas registradas</small>
+  </article>
+
+  <article class="metric">
+    <div class="metric-top">
+      <span class="metric-label">Cobrado</span>
+      <span class="metric-icon sage">{{ icon('check') }}</span>
+    </div>
+    <div class="metric-value">{{ total_cobrado }}</div>
+    <small class="metric-note">{{ facturas_pagadas_count }} facturas cobradas</small>
+  </article>
+
+  <article class="metric">
+    <div class="metric-top">
+      <span class="metric-label">Por cobrar</span>
+      <span class="metric-icon sand">{{ icon('file') }}</span>
+    </div>
+    <div class="metric-value">{{ total_por_cobrar }}</div>
+    <small class="metric-note">{{ facturas_pendientes_count }} facturas por cobrar</small>
+  </article>
+
+  <article class="metric">
+    <div class="metric-top">
+      <span class="metric-label">Clientes</span>
+      <span class="metric-icon lilac">{{ icon('users') }}</span>
+    </div>
+    <div class="metric-value">{{ clientes|length }}</div>
+    <small class="metric-note">Emisores y Receptores en RDS</small>
+  </article>
+</div>
+
+<div class="overview-grid">
+  <!-- FACTURAS RECIENTES -->
+  <section class="documents-panel recent-panel">
+    <div class="panel-toolbar">
+      <div>
+        <h2>Facturas recientes</h2>
+        <span>Los últimos movimientos registrados en el sistema</span>
+      </div>
+      <a href="/facturas" class="text-button" style="text-decoration:none; display:inline-flex; align-items:center; gap:6px;">
+        Ver todas {{ icon('arrow', size=15) }}
+      </a>
+    </div>
+
+    <div class="table-scroll">
+      <table class="invoice-table">
+        <thead>
+          <tr>
+            <th>FACTURA / CLIENTE</th>
+            <th>FECHA</th>
+            <th>IMPORTE</th>
+            <th>ESTADO</th>
+            <th><span class="sr-only">Acciones</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for f in facturas[:5] %}
+          <tr>
+            <td>
+              <div class="customer-cell">
+                <span class="customer-avatar sage">{{ (f.receptor_razon_social or 'FC')[:2]|upper }}</span>
+                <div>
+                  <strong>{{ f.receptor_razon_social or 'Cliente' }}</strong>
+                  <small>{{ f.folio }} {% if f.uuid_sat %}· SAT: {{ f.uuid_sat[:8] }}...{% endif %}</small>
+                </div>
+              </div>
+            </td>
+            <td>{{ f.fecha_emision_formateada or f.fecha_emision }}</td>
+            <td class="amount-cell">
+              <strong>${{ "{:,.2f}".format(f.total|float) }}</strong>
+              <small>MXN</small>
+            </td>
+            <td>
+              <span class="status-badge {% if f.estado == 'TIMBRADA' or f.estado == 'Pagada' %}paid{% elif f.estado == 'CANCELADA' %}overdue{% else %}pending{% endif %}">
+                <span></span>{{ f.estado }}
+              </span>
+            </td>
+            <td>
+              <a href="/facturas?id={{ f.factura_id }}" class="icon-button" style="display:grid; place-items:center; text-decoration:none;" title="Ver detalle">
+                {{ icon('arrow', size=17) }}
+              </a>
+            </td>
+          </tr>
+          {% else %}
+          <tr>
+            <td colspan="5" style="text-align: center; padding: 24px; color: #83917d;">
+              No hay facturas emitidas todavía.
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="panel-footer">
+      <span>Mostrando {{ [facturas|length, 5]|min }} de {{ facturas|length }} facturas</span>
+      <span>IMPORTES EN MXN · IVA INCLUIDO</span>
+    </div>
+  </section>
+
+  <!-- LATERAL: PULSO DE COBRANZA Y ALERTAS -->
+  <div class="overview-side">
+    <section class="collection-health">
+      <span class="eyebrow">EL PULSO DE TU NEGOCIO</span>
+      <h2>Cada cobro,<br>un paso adelante.</h2>
+      <div class="collection-ring" style="--progress: {{ porcentaje_cobro }}%;">
+        <div>
+          <strong>{{ porcentaje_cobro }}<small>%</small></strong>
+          <span>facturación activa</span>
+        </div>
+      </div>
+      <div class="health-legend">
+        <span><i></i>Cobradas <strong>{{ facturas_pagadas_count }}</strong></span>
+        <span><i></i>Por cobrar <strong>{{ facturas_pendientes_count }}</strong></span>
+      </div>
+    </section>
+
+    <section class="attention-card">
+      <span class="attention-mark">!</span>
+      <div>
+        <h3>{{ facturas_pendientes_count }} factura{% if facturas_pendientes_count != 1 %}s{% endif %} por revisar</h3>
+        <p>Da seguimiento a los cobros pendientes para mantener liquidez.</p>
+        <a href="/facturas" class="text-button" style="text-decoration:none; display:inline-flex; align-items:center; gap:6px;">
+          Revisar facturas {{ icon('arrow', size=14) }}
+        </a>
+      </div>
+    </section>
+  </div>
+</div>
+
+<!-- CATÁLOGO RÁPIDO DE SERVICIOS -->
+<section class="quick-services">
+  <div>
+    <span class="eyebrow">CATÁLOGO EN RDS (+100 SERVICIOS)</span>
+    <h2>Servicios a un clic.</h2>
+    <p>Explora conceptos disponibles con clave SAT y características asignadas.</p>
+  </div>
+  <div class="service-mini-list">
+    {% for s in servicios[:3] %}
+    <a href="/servicios?id={{ s.servicio_id }}" style="text-decoration: none; color: inherit; display: flex; align-items: center; gap: 14px; padding: 14px 18px; background: white; border: 1px solid var(--border); border-radius: 9px;">
+      <span class="metric-icon sage" style="width: 36px; height: 36px;">
+        {{ icon('book', size=18) }}
+      </span>
+      <span style="flex: 1;">
+        <strong style="display: block; font-size: 13px;">{{ s.descripcion }}</strong>
+        <small style="color: #798674;">SKU: {{ s.sku }} · ${{ "{:,.2f}".format(s.precio_base|float) }}</small>
+      </span>
+      {{ icon('arrow', size=15) }}
+    </a>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}

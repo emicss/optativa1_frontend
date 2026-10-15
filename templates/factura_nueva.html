@@ -1,0 +1,239 @@
+{% extends "base.html" %}
+
+{% block heading_action %}
+<a href="/facturas" class="button secondary" style="text-decoration:none; display:inline-flex; align-items:center; gap:8px;">
+  Volver a facturas
+</a>
+{% endblock %}
+
+{% block content %}
+<section class="invoice-form-section" style="max-width: 960px; margin: 0 auto;">
+  <form id="newInvoiceForm" class="invoice-form" onsubmit="emitirFactura(event)" style="background:#fff; border:1px solid var(--border); border-radius:12px; padding:32px;">
+    <p class="modal-description" style="margin-bottom: 24px;">
+      Selecciona el emisor y el receptor fiscal, agrega los servicios y calcula los importes. El backend ejecutará la transacción transaccional en RDS: <code>sp_ValidarDatosFiscales</code> &rarr; <code>sp_GenerarFolioFactura</code> &rarr; <code>sp_InsertarPartida</code> &rarr; <code>sp_CalcularTotales</code> &rarr; <code>sp_ActualizarUUID</code>.
+    </p>
+
+    <div id="emitError" style="display:none; padding:12px 16px; background:#fdf2f0; color:#b24531; border-radius:8px; font-size:13px; margin-bottom:20px;"></div>
+
+    <div class="form-columns" style="margin-bottom: 18px;">
+      <div>
+        <label for="emisor_id">Emisor Fiscal (Tu Empresa / Persona Moral)</label>
+        <select id="emisor_id" required>
+          <option value="" disabled {% if not selected_emisor %}selected{% endif %}>Selecciona el Emisor</option>
+          {% for e in emisores %}
+          <option value="{{ e.cliente_id }}" {% if selected_emisor == e.cliente_id %}selected{% endif %}>
+            {{ e.razon_social }} · RFC: {{ e.rfc }}
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div>
+        <label for="receptor_id">Receptor Fiscal (Cliente)</label>
+        <select id="receptor_id" required>
+          <option value="" disabled {% if not selected_receptor %}selected{% endif %}>Selecciona el Receptor</option>
+          {% for r in receptores %}
+          <option value="{{ r.cliente_id }}" {% if selected_receptor == r.cliente_id %}selected{% endif %}>
+            {{ r.razon_social }} · RFC: {{ r.rfc }}
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+
+    <div class="form-columns" style="margin-bottom: 24px;">
+      <div>
+        <label for="folio">Folio Fiscal (Opcional - Se autogenera si se omite)</label>
+        <input type="text" id="folio" placeholder="Ej. FAC-2026-0090" value="{{ default_folio }}">
+      </div>
+      <div>
+        <label for="fecha_emision">Fecha de Emisión</label>
+        <input type="date" id="fecha_emision" value="{{ today_date }}" required>
+      </div>
+    </div>
+
+    <!-- PARTIDAS DE FACTURA (Factura_Detalles) -->
+    <div style="margin-bottom: 24px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+        <label style="font-size: 13px; font-weight: 600; text-transform: uppercase; color: #475845; margin: 0;">
+          Conceptos y Partidas de Servicios (Factura_Detalles)
+        </label>
+        <span style="font-size: 11px; color: #7f8e7b;">Precios antes de IVA</span>
+      </div>
+
+      <div class="editable-lines" id="linesContainer">
+        <!-- Filas de partidas dinámicas generadas con JS -->
+      </div>
+
+      <button type="button" class="text-button add-service" onclick="agregarLinea()" style="margin-top: 10px;">
+        {{ icon('plus', size=16) }}
+        Agregar servicio a la factura
+      </button>
+    </div>
+
+    <!-- TOTALES E IMPUESTOS (Factura_Impuestos) -->
+    <div class="total-summary" style="margin-bottom: 28px;">
+      <p>
+        <span>Subtotal</span>
+        <strong id="displaySubtotal">$0.00</strong>
+      </p>
+      <p>
+        <span>IVA Trasladado (16%)</span>
+        <strong id="displayIva">$0.00</strong>
+      </p>
+      <p class="grand-total">
+        <span>Total</span>
+        <strong id="displayTotal">$0.00 <small>MXN</small></strong>
+      </p>
+    </div>
+
+    <div class="modal-actions">
+      <a href="/facturas" class="button secondary" style="text-decoration:none;">Cancelar</a>
+      <button type="submit" class="button primary" id="btnEmitir">
+        Emitir y Timbrar Factura (Transacción RDS) {{ icon('arrow', size=16) }}
+      </button>
+    </div>
+  </form>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const SERVICIOS = {{ servicios|tojson }};
+let lineCounter = 0;
+
+function agregarLinea(defaultServicioId = null, defaultQty = 1) {
+  lineCounter++;
+  const container = document.getElementById('linesContainer');
+  const lineDiv = document.createElement('div');
+  lineDiv.className = 'editable-line';
+  lineDiv.id = `line-${lineCounter}`;
+
+  let optionsHtml = SERVICIOS.map(s => `
+    <option value="${escapeHtml(s.servicio_id)}" data-precio="${parseFloat(s.precio_base || 0)}" ${defaultServicioId == s.servicio_id ? 'selected' : ''}>
+      ${escapeHtml(s.sku)} · ${escapeHtml(s.descripcion)} · $${parseFloat(s.precio_base || 0).toFixed(2)}
+    </option>
+  `).join('');
+
+  lineDiv.innerHTML = `
+    <select class="service-select" onchange="calcularTotales()" required>
+      ${optionsHtml}
+    </select>
+    <input type="number" class="qty-input" min="1" max="999" step="1" value="${defaultQty}" oninput="calcularTotales()" required>
+    <button type="button" class="icon-button danger" title="Quitar concepto" onclick="removerLinea('line-${lineCounter}')">
+      <span style="font-size: 16px; color: #b24531;">×</span>
+    </button>
+  `;
+
+  container.appendChild(lineDiv);
+  calcularTotales();
+}
+
+function removerLinea(id) {
+  const container = document.getElementById('linesContainer');
+  if (container.children.length <= 1) {
+    alert('La factura debe incluir al menos una partida de servicio.');
+    return;
+  }
+  document.getElementById(id)?.remove();
+  calcularTotales();
+}
+
+function calcularTotales() {
+  let subtotal = 0;
+  const lines = document.querySelectorAll('.editable-line');
+
+  lines.forEach(line => {
+    const sel = line.querySelector('.service-select');
+    const qtyInput = line.querySelector('.qty-input');
+    const selectedOption = sel.options[sel.selectedIndex];
+    const precio = parseFloat(selectedOption?.getAttribute('data-precio') || 0);
+    const qty = parseInt(qtyInput?.value || 1, 10);
+    subtotal += (precio * qty);
+  });
+
+  const iva = subtotal * 0.16;
+  const total = subtotal + iva;
+
+  document.getElementById('displaySubtotal').textContent = `$${subtotal.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  document.getElementById('displayIva').textContent = `$${iva.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  document.getElementById('displayTotal').innerHTML = `$${total.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} <small>MXN</small>`;
+}
+
+async function emitirFactura(e) {
+  e.preventDefault();
+  const errDiv = document.getElementById('emitError');
+  errDiv.style.display = 'none';
+
+  const emisorId = document.getElementById('emisor_id').value;
+  const receptorId = document.getElementById('receptor_id').value;
+  const folio = document.getElementById('folio').value.trim();
+
+  if (!emisorId || !receptorId) {
+    errDiv.textContent = 'Debes seleccionar tanto un Emisor como un Receptor.';
+    errDiv.style.display = 'block';
+    return;
+  }
+
+  const lines = document.querySelectorAll('.editable-line');
+  const partidas = [];
+  lines.forEach(line => {
+    const sel = line.querySelector('.service-select');
+    const qtyInput = line.querySelector('.qty-input');
+    const selectedOption = sel.options[sel.selectedIndex];
+    partidas.push({
+      servicio_id: sel.value,
+      cantidad: parseInt(qtyInput.value, 10),
+      precio_unitario: parseFloat(selectedOption.getAttribute('data-precio') || 0)
+    });
+  });
+
+  if (!partidas.length) {
+    errDiv.textContent = 'Agrega al menos un servicio a la factura.';
+    errDiv.style.display = 'block';
+    return;
+  }
+
+  const idempotencyKey = 'IDEMP-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+  const btn = document.getElementById('btnEmitir');
+  btn.disabled = true;
+  btn.textContent = 'Procesando transacción en RDS...';
+
+  try {
+    const res = await fetch('/api/facturas', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': idempotencyKey
+      },
+      body: JSON.stringify({
+        emisor_id: emisorId,
+        receptor_id: receptorId,
+        folio: folio || null,
+        partidas: partidas
+      })
+    });
+
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Error al emitir factura');
+
+    showToast(`¡Factura ${data.folio} timbrada con éxito! UUID: ${data.uuid_sat.substring(0,8)}...`);
+    setTimeout(() => {
+      window.location.href = '/facturas';
+    }, 900);
+  } catch (err) {
+    errDiv.textContent = err.message;
+    errDiv.style.display = 'block';
+    btn.disabled = false;
+    btn.textContent = 'Emitir y Timbrar Factura (Transacción RDS)';
+  }
+}
+
+// Inicializar con al menos una partida
+document.addEventListener('DOMContentLoaded', () => {
+  const urlParams = new URLSearchParams(window.location.search);
+  const initialServiceId = urlParams.get('servicio_id');
+  agregarLinea(initialServiceId);
+});
+</script>
+{% endblock %}

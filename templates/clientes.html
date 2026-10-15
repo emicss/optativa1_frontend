@@ -1,0 +1,253 @@
+{% extends "base.html" %}
+
+{% block heading_action %}
+<button type="button" class="button primary" onclick="openClientModal()">
+  {{ icon('plus', size=18) }}
+  Nuevo cliente
+</button>
+{% endblock %}
+
+{% block content %}
+<section>
+  <div class="section-toolbar">
+    <div>
+      <h2>Directorio de Personas Fiscales</h2>
+      <p>{{ clientes|length }} clientes registrados en RDS (Emisores y Receptores)</p>
+    </div>
+    <div style="display: flex; gap: 12px; align-items: center;">
+      <div class="filter-tabs" style="margin: 0;">
+        <button type="button" class="filter-tab {% if filtro_tipo == 'TODOS' %}active{% endif %}" onclick="filtrarTipo('TODOS')">Todos</button>
+        <button type="button" class="filter-tab {% if filtro_tipo == 'EMISOR' %}active{% endif %}" onclick="filtrarTipo('EMISOR')">Emisores</button>
+        <button type="button" class="filter-tab {% if filtro_tipo == 'RECEPTOR' %}active{% endif %}" onclick="filtrarTipo('RECEPTOR')">Receptores</button>
+      </div>
+      <div class="search-field">
+        {{ icon('search', size=16) }}
+        <input type="text" id="clientSearch" placeholder="Buscar RFC o razón social…" oninput="filtrarClientes()">
+      </div>
+    </div>
+  </div>
+
+  <div class="client-grid" id="clientGrid">
+    {% for c in clientes %}
+    <article class="client-card" data-tipo="{{ c.tipo_persona }}" data-search="{{ (c.razon_social ~ ' ' ~ c.rfc ~ ' ' ~ (c.correo or ''))|lower }}">
+      <div class="client-card-top">
+        <span class="customer-avatar large {% if c.tipo_persona == 'EMISOR' %}sage{% else %}sand{% endif %}">
+          {{ c.razon_social[:2]|upper }}
+        </span>
+        <span class="client-sector">{{ c.rfc }} · {{ c.tipo_persona }}</span>
+      </div>
+      <h3>{{ c.razon_social }}</h3>
+      <p>Régimen: {{ c.regimen_fiscal|default('General') }} · C.P. {{ c.codigo_postal|default('00000') }}</p>
+      <span class="client-email">{{ c.correo|default('Sin correo') }}</span>
+      <div class="client-card-bottom">
+        <div>
+          <small>ID Cliente</small>
+          <strong>#{{ c.cliente_id }}</strong>
+        </div>
+        <button type="button" class="icon-button" title="Ver detalle fiscal" onclick='verDetalleCliente({{ c|tojson }})'>
+          {{ icon('arrow') }}
+        </button>
+      </div>
+    </article>
+    {% else %}
+    <div class="empty-state" style="grid-column: 1 / -1;">
+      {{ icon('users', size=32) }}
+      <h3>No hay clientes en el catálogo</h3>
+      <p>Crea el primer emisor o receptor para comenzar a facturar.</p>
+    </div>
+    {% endfor %}
+  </div>
+</section>
+
+<!-- MODAL ALTA DE CLIENTE (sp_AltaCliente) -->
+<dialog id="clientModal" class="modal">
+  <div class="modal-heading">
+    <h2 id="modalTitle">Nuevo Cliente · sp_AltaCliente</h2>
+    <button type="button" class="icon-button" onclick="closeClientModal()">{{ icon('close') }}</button>
+  </div>
+  <form id="clientForm" class="invoice-form" onsubmit="guardarCliente(event)">
+    <input type="hidden" id="formClienteId" name="cliente_id" value="">
+    <p class="modal-description">
+      Registra una persona física o moral en AWS RDS. La validación de RFC y la inserción se ejecutan mediante <code>sp_AltaCliente</code>.
+    </p>
+
+    <div id="formError" style="display:none; padding:10px 14px; background:#fdf2f0; color:#b24531; border-radius:8px; font-size:13px; margin-bottom:12px;"></div>
+
+    <div class="form-columns">
+      <div>
+        <label for="tipo_persona">Tipo de Persona Fiscal</label>
+        <select id="tipo_persona" name="tipo_persona" required>
+          <option value="RECEPTOR">RECEPTOR (Cliente)</option>
+          <option value="EMISOR">EMISOR (Mi Empresa)</option>
+        </select>
+      </div>
+      <div>
+        <label for="rfc">RFC (12 moral o 13 física)</label>
+        <input type="text" id="rfc" name="rfc" required maxlength="13" placeholder="AAA010101AAA" style="text-transform: uppercase;">
+      </div>
+    </div>
+
+    <label for="razon_social">Razón Social o Nombre Legal Completo</label>
+    <input type="text" id="razon_social" name="razon_social" required placeholder="Ej. Soluciones Integrales S.A. de C.V.">
+
+    <div class="form-columns">
+      <div>
+        <label for="regimen_fiscal">Régimen Fiscal (SAT)</label>
+        <select id="regimen_fiscal" name="regimen_fiscal">
+          <option value="601">601 · General de Ley Personas Morales</option>
+          <option value="612">612 · Personas Físicas con Actividades Empresariales</option>
+          <option value="626">626 · Simplificado de Confianza (RESICO)</option>
+          <option value="605">605 · Sueldos y Salarios</option>
+          <option value="606">606 · Arrendamiento</option>
+        </select>
+      </div>
+      <div>
+        <label for="codigo_postal">Código Postal Fiscal (C.P.)</label>
+        <input type="text" id="codigo_postal" name="codigo_postal" required maxlength="5" placeholder="06000">
+      </div>
+    </div>
+
+    <label for="correo">Correo Electrónico de Facturación</label>
+    <input type="email" id="correo" name="correo" placeholder="facturacion@empresa.com">
+
+    <div class="modal-actions" style="margin-top: 24px;">
+      <button type="button" class="button secondary" onclick="closeClientModal()">Cancelar</button>
+      <button type="submit" class="button primary" id="btnSubmitClient">
+        Registrar Cliente (sp_AltaCliente) {{ icon('arrow', size=16) }}
+      </button>
+    </div>
+  </form>
+</dialog>
+
+<!-- MODAL DETALLE DE CLIENTE -->
+<dialog id="clientDetailModal" class="modal">
+  <div class="modal-heading">
+    <h2>Detalle del Cliente Fiscal</h2>
+    <button type="button" class="icon-button" onclick="document.getElementById('clientDetailModal').close()">{{ icon('close') }}</button>
+  </div>
+  <div class="entity-detail" id="clientDetailContent">
+    <!-- Rellenado dinámicamente con JavaScript -->
+  </div>
+</dialog>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let filtroActual = 'TODOS';
+
+function filtrarTipo(tipo) {
+  filtroActual = tipo;
+  document.querySelectorAll('.filter-tab').forEach(b => b.classList.remove('active'));
+  event.target.classList.add('active');
+  filtrarClientes();
+}
+
+function filtrarClientes() {
+  const query = (document.getElementById('clientSearch')?.value || '').toLowerCase();
+  const cards = document.querySelectorAll('.client-card');
+  cards.forEach(card => {
+    const cardTipo = card.getAttribute('data-tipo');
+    const cardSearch = card.getAttribute('data-search');
+    const matchTipo = (filtroActual === 'TODOS' || cardTipo === filtroActual);
+    const matchQuery = cardSearch.includes(query);
+    card.style.display = (matchTipo && matchQuery) ? 'flex' : 'none';
+  });
+}
+
+function openClientModal() {
+  document.getElementById('formClienteId').value = '';
+  document.getElementById('clientForm').reset();
+  document.getElementById('modalTitle').textContent = 'Nuevo Cliente · sp_AltaCliente';
+  document.getElementById('btnSubmitClient').textContent = 'Registrar Cliente (sp_AltaCliente)';
+  document.getElementById('formError').style.display = 'none';
+  document.getElementById('clientModal').showModal();
+}
+
+function closeClientModal() {
+  document.getElementById('clientModal').close();
+}
+
+async function guardarCliente(e) {
+  e.preventDefault();
+  const errDiv = document.getElementById('formError');
+  errDiv.style.display = 'none';
+
+  const rfcVal = document.getElementById('rfc').value.trim().toUpperCase();
+  if (rfcVal.length !== 12 && rfcVal.length !== 13) {
+    errDiv.textContent = 'El RFC debe tener 12 (moral) o 13 (física) caracteres.';
+    errDiv.style.display = 'block';
+    return;
+  }
+
+  const payload = {
+    rfc: rfcVal,
+    razon_social: document.getElementById('razon_social').value.trim(),
+    regimen_fiscal: document.getElementById('regimen_fiscal').value.trim(),
+    codigo_postal: document.getElementById('codigo_postal').value.trim(),
+    correo: document.getElementById('correo').value.trim(),
+    tipo_persona: document.getElementById('tipo_persona').value
+  };
+
+  const clienteId = document.getElementById('formClienteId').value;
+  const url = clienteId ? `/api/clientes/${clienteId}` : '/api/clientes';
+  const method = clienteId ? 'PUT' : 'POST';
+
+  try {
+    const res = await fetch(url, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Error al guardar cliente');
+
+    showToast(data.mensaje || 'Cliente guardado correctamente');
+    closeClientModal();
+    setTimeout(() => window.location.reload(), 700);
+  } catch (err) {
+    errDiv.textContent = err.message;
+    errDiv.style.display = 'block';
+  }
+}
+
+function verDetalleCliente(c) {
+  const container = document.getElementById('clientDetailContent');
+  const safeRazon = escapeHtml(c.razon_social || '');
+  const safeRfc = escapeHtml(c.rfc || '');
+  const safeTipo = escapeHtml(c.tipo_persona || 'RECEPTOR');
+  const safeRegimen = escapeHtml(c.regimen_fiscal || '601 General');
+  const safeCp = escapeHtml(c.codigo_postal || 'N/A');
+  const safeCorreo = escapeHtml(c.correo || 'No especificado');
+  const safeFecha = escapeHtml(c.fecha_registro ? c.fecha_registro.split('T')[0] : 'Hoy');
+  const safeAvatar = escapeHtml((c.razon_social || 'CL').substring(0, 2).toUpperCase());
+
+  container.innerHTML = `
+    <div class="customer-cell" style="margin-bottom: 20px;">
+      <span class="customer-avatar large sage">${safeAvatar}</span>
+      <div>
+        <strong style="font-size: 16px;">${safeRazon}</strong>
+        <small style="color: #6a7764;">${safeRfc} · ${safeTipo}</small>
+      </div>
+    </div>
+    <dl>
+      <dt>Tipo Fiscal</dt><dd><strong>${safeTipo}</strong></dd>
+      <dt>RFC SAT</dt><dd><code>${safeRfc}</code></dd>
+      <dt>Régimen Fiscal</dt><dd>${safeRegimen}</dd>
+      <dt>Código Postal</dt><dd>${safeCp}</dd>
+      <dt>Correo electrónico</dt><dd>${safeCorreo}</dd>
+      <dt>Fecha de Registro</dt><dd>${safeFecha}</dd>
+    </dl>
+    <div class="modal-actions" style="margin-top: 24px;">
+      <a href="/facturas?cliente=${encodeURIComponent(c.razon_social || '')}" class="button secondary" style="text-decoration:none;">
+        Ver facturas
+      </a>
+      <a href="/facturas/nueva?cliente_id=${encodeURIComponent(c.cliente_id || '')}" class="button primary" style="text-decoration:none;">
+        Nueva factura
+      </a>
+    </div>
+  `;
+  document.getElementById('clientDetailModal').showModal();
+}
+
+</script>
+{% endblock %}

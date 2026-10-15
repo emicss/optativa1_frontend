@@ -1,0 +1,265 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="documents-panel">
+  <div class="panel-toolbar">
+    <div>
+      <h2>Todas tus facturas <span class="count-pill">{{ facturas|length }}</span></h2>
+      <span>Seguimiento fiscal y financiero alojado en AWS RDS</span>
+    </div>
+    <div style="display: flex; gap: 12px; align-items: center;">
+      <div class="search-field">
+        {{ icon('search', size=16) }}
+        <input type="text" id="invoiceSearch" placeholder="Buscar folio o cliente…" oninput="filtrarFacturas()">
+      </div>
+      <a href="/facturas/nueva" class="button primary" style="text-decoration:none; display:inline-flex; align-items:center; gap:8px;">
+        {{ icon('plus', size=16) }}
+        Nueva factura
+      </a>
+    </div>
+  </div>
+
+  <div class="filter-tabs">
+    <button type="button" class="filter-tab active" onclick="filtrarEstado('TODAS')">Todas ({{ facturas|length }})</button>
+    <button type="button" class="filter-tab" onclick="filtrarEstado('TIMBRADA')">Timbradas</button>
+    <button type="button" class="filter-tab" onclick="filtrarEstado('PENDIENTE')">Pendientes / Borrador</button>
+    <button type="button" class="filter-tab" onclick="filtrarEstado('CANCELADA')">Canceladas</button>
+  </div>
+
+  <div class="table-scroll">
+    <table class="invoice-table">
+      <thead>
+        <tr>
+          <th>FACTURA / CLIENTE</th>
+          <th>FECHA</th>
+          <th>IMPORTE TOTAL</th>
+          <th>ESTADO FISCAL</th>
+          <th><span class="sr-only">Detalle</span></th>
+        </tr>
+      </thead>
+      <tbody id="invoiceTableBody">
+        {% for f in facturas %}
+        <tr class="invoice-row" data-estado="{{ f.estado|upper }}" data-search="{{ (f.folio ~ ' ' ~ (f.receptor_razon_social or '') ~ ' ' ~ (f.emisor_razon_social or '') ~ ' ' ~ (f.uuid_sat or ''))|lower }}">
+          <td>
+            <div class="customer-cell">
+              <span class="customer-avatar {% if f.estado == 'CANCELADA' %}sand{% else %}sage{% endif %}">
+                {{ (f.receptor_razon_social or 'FC')[:2]|upper }}
+              </span>
+              <div>
+                <strong>{{ f.receptor_razon_social or 'Cliente' }}</strong>
+                <small>{{ f.folio }} {% if f.uuid_sat %}· UUID: {{ f.uuid_sat[:8] }}...{% endif %}</small>
+              </div>
+            </div>
+          </td>
+          <td>{{ f.fecha_emision_formateada or f.fecha_emision }}</td>
+          <td class="amount-cell">
+            <strong>${{ "{:,.2f}".format(f.total|float) }}</strong>
+            <small>MXN</small>
+          </td>
+          <td>
+            <span class="status-badge {% if f.estado == 'TIMBRADA' or f.estado == 'Pagada' %}paid{% elif f.estado == 'CANCELADA' %}overdue{% else %}pending{% endif %}">
+              <span></span>{{ f.estado }}
+            </span>
+          </td>
+          <td>
+            <button type="button" class="icon-button" title="Ver detalle completo (sp_ConsultarFacturaCompleta)" onclick="verFacturaCompleta({{ f.factura_id }})">
+              {{ icon('arrow', size=17) }}
+            </button>
+          </td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="5" style="text-align: center; padding: 36px; color: #7f8e79;">
+            No se han encontrado facturas en el sistema.
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="panel-footer">
+    <span id="resultCount">{{ facturas|length }} resultados</span>
+    <span>IMPORTES EN MXN · TRANSACCIÓN SQL</span>
+  </div>
+</section>
+
+<!-- MODAL DETALLE DE FACTURA (sp_ConsultarFacturaCompleta y sp_CancelarFactura) -->
+<dialog id="invoiceDetailModal" class="modal" style="max-width: 680px;">
+  <div class="modal-heading">
+    <h2>Detalle de Factura · sp_ConsultarFacturaCompleta</h2>
+    <button type="button" class="icon-button" onclick="document.getElementById('invoiceDetailModal').close()">{{ icon('close') }}</button>
+  </div>
+  <div id="invoiceDetailBody" class="invoice-detail">
+    <p style="color: #798774;">Cargando factura...</p>
+  </div>
+</dialog>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let estadoFiltro = 'TODAS';
+
+function filtrarEstado(estado) {
+  estadoFiltro = estado;
+  document.querySelectorAll('.filter-tab').forEach(b => b.classList.remove('active'));
+  event.target.classList.add('active');
+  aplicarFiltros();
+}
+
+function filtrarFacturas() {
+  aplicarFiltros();
+}
+
+function aplicarFiltros() {
+  const query = (document.getElementById('invoiceSearch')?.value || '').toLowerCase();
+  const rows = document.querySelectorAll('.invoice-row');
+  let visibleCount = 0;
+
+  rows.forEach(r => {
+    const estado = r.getAttribute('data-estado');
+    const search = r.getAttribute('data-search');
+    let matchEstado = false;
+
+    if (estadoFiltro === 'TODAS') matchEstado = true;
+    else if (estadoFiltro === 'TIMBRADA') matchEstado = (estado === 'TIMBRADA' || estado === 'PAGADA');
+    else if (estadoFiltro === 'PENDIENTE') matchEstado = (estado === 'PENDIENTE' || estado === 'BORRADOR');
+    else if (estadoFiltro === 'CANCELADA') matchEstado = (estado === 'CANCELADA');
+
+    const matchQuery = search.includes(query);
+    const visible = matchEstado && matchQuery;
+    r.style.display = visible ? '' : 'none';
+    if (visible) visibleCount++;
+  });
+
+  const countElem = document.getElementById('resultCount');
+  if (countElem) countElem.textContent = `${visibleCount} resultados`;
+}
+
+async function verFacturaCompleta(id) {
+  const modal = document.getElementById('invoiceDetailModal');
+  const body = document.getElementById('invoiceDetailBody');
+  body.innerHTML = '<p style="color: #798774;">Consultando factura mediante sp_ConsultarFacturaCompleta...</p>';
+  modal.showModal();
+
+  try {
+    const res = await fetch(`/api/facturas/${id}`);
+    const f = await res.json();
+    if (!res.ok) throw new Error(f.error || 'No se pudo obtener la factura');
+
+    const estadoBadgeClass = (f.estado === 'TIMBRADA' || f.estado === 'Pagada') ? 'paid' : (f.estado === 'CANCELADA' ? 'overdue' : 'pending');
+
+    let partidasHtml = '';
+    if (Array.isArray(f.partidas) && f.partidas.length) {
+      partidasHtml = f.partidas.map(p => `
+        <div style="display:flex; justify-content:space-between; align-items:center; padding:10px 0; border-bottom:1px solid #edf1e8;">
+          <div>
+            <strong style="display:block; font-size:13px; color:#2c3a2d;">${escapeHtml(p.descripcion || p.sku || 'Servicio')}</strong>
+            <small style="color:#788673;">${escapeHtml(p.cantidad)} × $${parseFloat(p.precio_unitario || 0).toFixed(2)} · SAT: ${escapeHtml(p.clave_sat || '80101500')}</small>
+          </div>
+          <strong style="color:#2c3a2d;">$${parseFloat(p.importe || 0).toFixed(2)}</strong>
+        </div>
+      `).join('');
+    } else {
+      partidasHtml = '<p style="font-size:12px; color:#83917d;">Sin partidas registradas.</p>';
+    }
+
+    let impuestosHtml = '';
+    if (Array.isArray(f.impuestos) && f.impuestos.length) {
+      impuestosHtml = f.impuestos.map(i => `
+        <p style="display:flex; justify-content:space-between; margin:4px 0; font-size:13px;">
+          <span>${escapeHtml(i.impuesto_nombre || 'IVA')} (${(parseFloat(i.impuesto_tasa || 0.16) * 100).toFixed(0)}%)</span>
+          <strong>$${parseFloat(i.monto_retenido_o_trasladado || 0).toFixed(2)}</strong>
+        </p>
+      `).join('');
+    } else {
+      impuestosHtml = `
+        <p style="display:flex; justify-content:space-between; margin:4px 0; font-size:13px;">
+          <span>IVA Trasladado (16%)</span>
+          <strong>$${(parseFloat(f.subtotal || 0) * 0.16).toFixed(2)}</strong>
+        </p>
+      `;
+    }
+
+    const safeFolio = escapeHtml(f.folio || '');
+    const safeUuid = escapeHtml(f.uuid_sat || 'No timbrada');
+    const safeEstado = escapeHtml(f.estado || 'BORRADOR');
+    const safeEmisor = escapeHtml(f.emisor_razon_social || 'Emisor Principal');
+    const safeEmisorRfc = escapeHtml(f.emisor_rfc || 'N/A');
+    const safeReceptor = escapeHtml(f.receptor_razon_social || 'Cliente');
+    const safeReceptorRfc = escapeHtml(f.receptor_rfc || 'N/A');
+    const safeFacturaId = escapeHtml(f.factura_id || '');
+
+    body.innerHTML = `
+      <div class="invoice-detail-title" style="margin-bottom: 16px;">
+        <div>
+          <span style="font-size: 18px; font-weight: 700;">${safeFolio}</span>
+          <div style="font-size: 11px; color: #72816e; margin-top: 4px;">UUID SAT: <code>${safeUuid}</code></div>
+        </div>
+        <span class="status-badge ${estadoBadgeClass}">
+          <span></span>${safeEstado}
+        </span>
+      </div>
+
+      <div style="display:grid; grid-template-columns: 1fr 1fr; gap:16px; background:#f7f9f3; border:1px solid var(--border); border-radius:9px; padding:14px; margin-bottom:18px;">
+        <div>
+          <small style="font-size:10px; font-weight:600; color:#5c6c56; text-transform:uppercase;">Emisor</small>
+          <strong style="display:block; font-size:13px; color:#2c392d; margin-top:2px;">${safeEmisor}</strong>
+          <span style="font-size:11px; color:#687863;">RFC: ${safeEmisorRfc}</span>
+        </div>
+        <div>
+          <small style="font-size:10px; font-weight:600; color:#5c6c56; text-transform:uppercase;">Receptor (Cliente)</small>
+          <strong style="display:block; font-size:13px; color:#2c392d; margin-top:2px;">${safeReceptor}</strong>
+          <span style="font-size:11px; color:#687863;">RFC: ${safeReceptorRfc}</span>
+        </div>
+      </div>
+
+      <div style="margin-bottom: 18px;">
+        <h4 style="margin: 0 0 10px; font-size: 13px; color: #40533f; text-transform: uppercase;">Conceptos y Partidas (Factura_Detalles)</h4>
+        <div style="background:#fff; border:1px solid var(--border); border-radius:9px; padding:12px 16px;">
+          ${partidasHtml}
+        </div>
+      </div>
+
+      <div class="total-summary" style="margin-bottom: 24px;">
+        <p><span>Subtotal</span><strong>$${parseFloat(f.subtotal || 0).toFixed(2)}</strong></p>
+        ${impuestosHtml}
+        <p class="grand-total">
+          <span>Total</span>
+          <strong>$${parseFloat(f.total || 0).toFixed(2)} <small>MXN</small></strong>
+        </p>
+      </div>
+
+      <div class="modal-actions">
+        ${f.estado !== 'CANCELADA' ? `
+          <button type="button" class="button secondary" style="color:#b24531; border-color:#f0cfc8;" onclick="cancelarFactura('${safeFacturaId}')">
+            Cancelar Factura (sp_CancelarFactura)
+          </button>
+        ` : '<span style="font-size:12px; color:#b24531; font-weight:600;">Factura Cancelada en RDS</span>'}
+        <button type="button" class="button primary" onclick="document.getElementById('invoiceDetailModal').close()">
+          Cerrar
+        </button>
+      </div>
+    `;
+  } catch (err) {
+    body.innerHTML = `<p style="color:#b24531;">${escapeHtml(err.message)}</p>`;
+  }
+}
+
+async function cancelarFactura(id) {
+  if (!confirm('¿Estás seguro de cancelar esta factura fiscal en AWS RDS? Esta acción ejecutará sp_CancelarFactura y registrará el evento en DynamoDB.')) return;
+
+  try {
+    const res = await fetch(`/api/facturas/${id}/cancelar`, { method: 'PUT' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Error al cancelar la factura');
+
+    showToast(data.mensaje || 'Factura cancelada correctamente');
+    document.getElementById('invoiceDetailModal').close();
+    setTimeout(() => window.location.reload(), 700);
+  } catch (err) {
+    alert(err.message);
+  }
+}
+</script>
+{% endblock %}
